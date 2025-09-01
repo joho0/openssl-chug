@@ -1,0 +1,7 @@
+# os
+Thumbs.db
+Desktop.ini
+
+# logs/temp
+*.log
+*.tmp
