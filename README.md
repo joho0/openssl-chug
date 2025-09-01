@@ -4,8 +4,8 @@
 
 # OpenSSL Chug
 
-**Windows OpenSSL build automation.**  
-Pick a stable 3.x tag, choose a build (`secure` / `weak` / `fips`), and get a clean, versioned install—zero guesswork.
+**Windows OpenSSL build automation**  
+Pick a stable 3.x tag, choose a build (`secure` / `weak` / `fips`), and get a clean, versioned install with zero guesswork!
 
 > **Status:** v1.0 (working build flow, menus, and MSVC auto-bootstrap)
 
@@ -83,9 +83,10 @@ openssl-chug.cmd C:\src\openssl D:\OpenSSL
 
 - **REPO**
   - Chug verifies the OpenSSL repo exists at the path provided
-  - If the path provided doesn’t exist, you’ll receive an error
+  - If the repo doesn’t exist, you’ll receive an error
 - **INSTALL_ROOT**
-  - If the path provided doesn’t exist, you’ll be **prompted** to create it
+  - Chug verifies the folder exists at the path provided
+  - If the folder doesn’t exist, you’ll be **prompted** to create it
 
 ---
 
@@ -110,9 +111,9 @@ By default, installs go under `%USERPROFILE%\OpenSSL` (or the `INSTALL_ROOT` you
 
 ## Notes
 
-- Stable-only releases are presented in menus (no pre-releases).
-- If NASM isn’t found, Chug will configure OpenSSL with `no-asm`.
-- If not already in a Visual C++ tools environment, Chug tries to load `vcvars64.bat`.
+- Stable-only releases are presented in menus (no pre-releases)
+- If NASM isn’t found, Chug will configure OpenSSL with `no-asm`
+- If not already in a Visual C++ tools environment, Chug tries to load `vcvars64.bat`
 
 ---
 
