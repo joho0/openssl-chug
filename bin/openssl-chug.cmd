@@ -5,14 +5,22 @@ rem =========================
 rem OpenSSL Chug - main build
 rem =========================
 
-rem --- settings / validation ---
-rem usage: openssl-chug.cmd [REPO] [INSTALL_ROOT]
+rem --- parse args ---
+rem usage: openssl-chug.cmd [REPO] [INSTALL_ROOT] [--source|-s]
+set "WITH_SOURCE=0"
+set "ARG1="
+set "ARG2="
+for %%A in (%*) do (
+  if /i "%%~A"=="--source" ( set "WITH_SOURCE=1" ) else (
+    if /i "%%~A"=="-s" ( set "WITH_SOURCE=1" ) else (
+      if not defined ARG1 ( set "ARG1=%%~A" ) else if not defined ARG2 ( set "ARG2=%%~A" )
+    )
+  )
+)
 
-rem defaults (no blocks)
-if "%~1"=="" set "REPO=%USERPROFILE%\Projects\openssl"
-if not "%~1"=="" set "REPO=%~1"
-if "%~2"=="" set "INSTALL_ROOT=%USERPROFILE%\OpenSSL"
-if not "%~2"=="" set "INSTALL_ROOT=%~2"
+rem --- settings / validation ---
+if not defined ARG1 ( set "REPO=%USERPROFILE%\Projects\openssl" ) else ( set "REPO=%ARG1%" )
+if not defined ARG2 ( set "INSTALL_ROOT=%USERPROFILE%\OpenSSL" ) else ( set "INSTALL_ROOT=%ARG2%" )
 
 rem trim trailing backslashes
 if "%REPO:~-1%"=="\" set "REPO=%REPO:~0,-1%"
@@ -39,7 +47,7 @@ echo [CHUG] Created INSTALL_ROOT: "%INSTALL_ROOT%"
 rem --- banner ---
 echo [CHUG] REPO="%REPO%"
 echo [CHUG] INSTALL_ROOT="%INSTALL_ROOT%"
-
+echo [CHUG] Include source in output: %WITH_SOURCE%
 echo.
 echo OpenSSL Chug v1.0
 
@@ -90,11 +98,10 @@ where nasm>nul 2>nul || (
 )
 
 rem --- ensure folders exist ---
-if not exist "%OUTROOT%\" mkdir "%OUTROOT%" >nul 2>nul
-if not exist "%PREFIX%\" mkdir "%PREFIX%" >nul 2>nul
+if not exist "%OUTROOT%\"    mkdir "%OUTROOT%"    >nul 2>nul
+if not exist "%PREFIX%\"     mkdir "%PREFIX%"     >nul 2>nul
 if not exist "%OPENSSLDIR%\" mkdir "%OPENSSLDIR%" >nul 2>nul
-
-echo CHUGALUG!
+echo [INFO] CHUGALUG!
 echo.
 
 rem --- prepare git worktree at the tag ---
@@ -151,6 +158,7 @@ rem --- write quickstart README ---
   echo Version: %VERSION%
   echo Build: %BUILD_KIND%
   echo Install: %PREFIX%
+  echo Include source in output: %WITH_SOURCE%
   echo.
   echo Usage:
   echo   set "PATH=%PREFIX%\bin;%%PATH%%"
@@ -171,8 +179,19 @@ echo [OK] Build complete.
 echo [INFO] "%PREFIX%\bin\openssl.exe" version -a
 "%PREFIX%\bin\openssl.exe" version -a
 popd
-exit /b 0
 
+rem --- cleanup src worktree unless keeping source ---
+if "%WITH_SOURCE%"=="0" (
+  echo [INFO] Cleaning up src worktree: "%SRC_DIR%"
+  pushd "%REPO%" >nul 2>nul && (
+    call :REMOVE_WORKTREE "%SRC_DIR%"
+    popd
+  )
+) else (
+  echo [INFO] Keeping src worktree: "%SRC_DIR%"
+)
+
+exit /b 0
 
 :: ------------------------------------------------------------
 :: Tag picker (branch -> tag) — stable only (no alpha/beta/rc)
@@ -384,9 +403,6 @@ exit /b
   echo default = default_sect
   echo.
   echo [default_sect]
-  echo activate = 1
-  echo.
-  echo [fips_sect]
   echo activate = 1
   echo.
   echo [algorithm_sect]
