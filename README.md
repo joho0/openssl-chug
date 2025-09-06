@@ -61,10 +61,14 @@ At the end you’ll get an OpenSSL ready to use, plus a quick README and sample 
 openssl-chug.cmd [REPO] [INSTALL_ROOT]
 ```
 
-**Defaults (if omitted):**
+**Defaults**
 
 - `REPO` → `%USERPROFILE%\Projects\openssl`
+  - Chug verifies the OpenSSL repo exists at the path provided
+  - If the repo doesn’t exist, you’ll receive an error
 - `INSTALL_ROOT` → `%USERPROFILE%\OpenSSL`
+  - Chug verifies the folder exists at the path provided
+  - If the folder doesn’t exist, you’ll be **prompted** to create it
 
 **Examples:**
 
@@ -78,15 +82,6 @@ openssl-chug.cmd C:\src\openssl
 :: Custom repo and custom install root
 openssl-chug.cmd C:\src\openssl D:\OpenSSL
 ```
-
-**Validation**
-
-- **REPO**
-  - Chug verifies the OpenSSL repo exists at the path provided
-  - If the repo doesn’t exist, you’ll receive an error
-- **INSTALL_ROOT**
-  - Chug verifies the folder exists at the path provided
-  - If the folder doesn’t exist, you’ll be **prompted** to create it
 
 ---
 
