@@ -8,6 +8,7 @@ rem =========================
 rem --- parse args ---
 rem usage: openssl-chug.cmd [-h|--help] [-v|--verbose]
 rem        openssl-chug.cmd [REPO] [INSTALL_ROOT] [--source|-s] [-v|--verbose]
+set "CHUG_VERSION=1.0"
 set "WITH_SOURCE=0"
 set "VERBOSE=0"
 set "SHOW_HELP="
@@ -36,21 +37,21 @@ if "%REPO:~-1%"=="\" set "REPO=%REPO:~0,-1%"
 if "%INSTALL_ROOT:~-1%"=="\" set "INSTALL_ROOT=%INSTALL_ROOT:~0,-1%"
 
 rem --- REPO must exist and look like OpenSSL ---
-if not exist "%REPO%\*" ( echo [CHUG] ERROR: REPO not found: "%REPO%" & exit /b 1 )
-if not exist "%REPO%\README.md" ( echo [CHUG] ERROR: README.md missing under "%REPO%" & exit /b 1 )
+if not exist "%REPO%\*" ( echo [ERR] REPO not found: "%REPO%" & exit /b 1 )
+if not exist "%REPO%\README.md" ( echo [ERR] README.md missing under "%REPO%" & exit /b 1 )
 rem Require README.md line 1 (allow leading '#' or spaces)
 findstr /n /r "^" "%REPO%\README.md" | findstr /r "^1:[# ]*Welcome to the OpenSSL Project" >nul
-if errorlevel 1 ( echo [CHUG] ERROR: README.md line 1 must be: "Welcome to the OpenSSL Project" & exit /b 1 )
+if errorlevel 1 ( echo [ERR] README.md line 1 must be: "Welcome to the OpenSSL Project" & exit /b 1 )
 
 rem --- INSTALL_ROOT: ensure valid directory (prompt to create) ---
 if exist "%INSTALL_ROOT%\*" goto :inst_ok
-if exist "%INSTALL_ROOT%" ( echo [CHUG] ERROR: INSTALL_ROOT exists but is not a directory: "%INSTALL_ROOT%" & exit /b 1 )
+if exist "%INSTALL_ROOT%" ( echo [ERR] INSTALL_ROOT exists but is not a directory: "%INSTALL_ROOT%" & exit /b 1 )
 call :V [CHUG] WARN: INSTALL_ROOT not found: "%INSTALL_ROOT%"
 echo INSTALL_ROOT not found: "%INSTALL_ROOT%"
 choice /C YN /M "Create it now?"
-if errorlevel 2 ( echo [CHUG] ERROR: Aborted; INSTALL_ROOT missing. & exit /b 1 )
+if errorlevel 2 ( echo [ERR] Aborted; INSTALL_ROOT missing. & exit /b 1 )
 mkdir "%INSTALL_ROOT%" 2>nul
-if errorlevel 1 ( echo [CHUG] ERROR: Failed to create INSTALL_ROOT: "%INSTALL_ROOT%" & exit /b 1 )
+if errorlevel 1 ( echo [ERR] Failed to create INSTALL_ROOT: "%INSTALL_ROOT%" & exit /b 1 )
 call :V [CHUG] Created INSTALL_ROOT: "%INSTALL_ROOT%"
 
 :inst_ok
@@ -58,8 +59,8 @@ rem --- banner ---
 call :V [CHUG] REPO="%REPO%"
 call :V [CHUG] INSTALL_ROOT="%INSTALL_ROOT%"
 call :V [CHUG] Include source in output: %WITH_SOURCE%
-echo.
-echo OpenSSL Chug v1.0
+echo(
+echo OpenSSL Chug v%CHUG_VERSION%
 
 rem --- tag picker (self-contained: branch -> tag) ---
 call :PICK_TAG "%REPO%"
@@ -103,7 +104,7 @@ where nmake >nul 2>nul || (
 
 rem --- asm check (optional) ---
 set "ASM_OPT="
-where nasm>nul 2>nul || (
+where nasm >nul 2>nul || (
   set "ASM_OPT=no-asm"
   echo [INFO] NASM not found; building with no-asm.
 )
@@ -114,7 +115,7 @@ if not exist "%PREFIX%\"     mkdir "%PREFIX%"     >nul 2>nul
 if not exist "%OPENSSLDIR%\" mkdir "%OPENSSLDIR%" >nul 2>nul
 
 echo [INFO] CHUGALUG!
-echo.
+echo(
 
 rem --- prepare git worktree at the tag ---
 echo [INFO] Preparing %TAG% (%BUILD_KIND%)...
@@ -136,7 +137,7 @@ if /i "%BUILD_KIND%"=="weak"   set "CFG_BUILDOPT=enable-legacy"
 if /i "%BUILD_KIND%"=="fips"   set "CFG_BUILDOPT=enable-fips"
 
 rem NOTE: Put options first, target last. Do NOT pass "release".
-echo.
+echo(
 echo [INFO] Configuring %TAG% (%BUILD_KIND%)...
 echo perl Configure shared %ASM_OPT% "--prefix=%PREFIX%" "--openssldir=%OPENSSLDIR%" %CFG_BUILDOPT% %CFG_TARGET%
 perl Configure shared %ASM_OPT% "--prefix=%PREFIX%" "--openssldir=%OPENSSLDIR%" %CFG_BUILDOPT% %CFG_TARGET%
@@ -176,16 +177,16 @@ rem --- write quickstart README ---
   echo Build: %BUILD_KIND%
   echo Install: %PREFIX%
   echo Include source in output: %WITH_SOURCE%
-  echo.
+  echo(
   echo Usage:
   echo set "PATH=%PREFIX%\bin;%%PATH%%"
-  echo ^(optional^) set "OPENSSL_CONF=" to one of:
+  echo ^(optional^) set OPENSSL_CONF to one of:
 )
 if exist "%CNF_SEC%"  >>"%README%" echo %CNF_SEC%
 if exist "%CNF_WEAK%" >>"%README%" echo %CNF_WEAK%
 if exist "%CNF_FIPS%" >>"%README%" echo %CNF_FIPS%
 >>"%README%" (
-  echo.
+  echo(
   echo Verify:
   echo openssl version -a
 )
@@ -211,21 +212,21 @@ if "%WITH_SOURCE%"=="0" (
 exit /b 0
 
 :USAGE
-echo OpenSSL Chug — Windows OpenSSL build helper
-echo.
+echo OpenSSL Chug v%CHUG_VERSION% - Windows OpenSSL build helper
+echo(
 echo Usage:
 echo   openssl-chug.cmd [-h^|--help] [-v^|--verbose]
 echo   openssl-chug.cmd [REPO] [INSTALL_ROOT] [--source ^| -s] [-v^|--verbose]
-echo.
+echo(
 echo Arguments:
 echo   REPO          Path to local OpenSSL git repo. Default: %%USERPROFILE%%\Projects\openssl
 echo   INSTALL_ROOT  Root for installs/output.      Default: %%USERPROFILE%%\OpenSSL
-echo.
+echo(
 echo Options:
 echo   -s, --source   Keep the git worktree source in the output under ^"src^".
 echo   -v, --verbose  Show detailed [CHUG] logs.
 echo   -h, --help     Show this help and exit.
-echo.
+echo(
 echo Examples:
 echo   openssl-chug.cmd
 echo   openssl-chug.cmd -s
@@ -234,7 +235,7 @@ echo   openssl-chug.cmd C:\src\openssl D:\OpenSSL --source -v
 exit /b 0
 
 :: ------------------------------------------------------------
-:: Tag picker (branch -> tag) — stable only (no alpha/beta/rc)
+:: Tag picker (branch -> tag) - stable only (no alpha/beta/rc)
 :: ------------------------------------------------------------
 :PICK_TAG
 rem args: %1 = REPO path
@@ -343,20 +344,12 @@ if %_tsel% GTR %_TAG_COUNT% set "_tsel=1"
 
 set "_TAG=!_T_%_tsel%!"
 set "_VERSION=%_TAG:openssl-=%"
-for /f "tokens=1-3 delims=." %%a in ("%_VERSION%") do (
-  set "_MAJOR=%%a"
-  set "_MINOR=%%b"
-  set "_RELEASE=%%c"
-)
 call :V [CHUG] Tag: %_TAG%
 
 popd
 endlocal & (
   set "TAG=%_TAG%"
   set "VERSION=%_VERSION%"
-  set "MAJOR=%_MAJOR%"
-  set "MINOR=%_MINOR%"
-  set "RELEASE=%_RELEASE%"
   set "BRANCH=%_BRANCH%"
 )
 exit /b 0
@@ -391,13 +384,13 @@ exit /b
 :WRITE_SECURE
 >"%~1" (
   echo openssl_conf = openssl_init
-  echo.
+  echo(
   echo [openssl_init]
   echo providers = provider_sect
-  echo.
+  echo(
   echo [provider_sect]
   echo default = default_sect
-  echo.
+  echo(
   echo [default_sect]
   echo activate = 1
 )
@@ -406,17 +399,17 @@ exit /b
 :WRITE_WEAK
 >"%~1" (
   echo openssl_conf = openssl_init
-  echo.
+  echo(
   echo [openssl_init]
   echo providers = provider_sect
-  echo.
+  echo(
   echo [provider_sect]
   echo default = default_sect
   echo legacy = legacy_sect
-  echo.
+  echo(
   echo [default_sect]
   echo activate = 1
-  echo.
+  echo(
   echo [legacy_sect]
   echo activate = 1
 )
@@ -429,20 +422,20 @@ rem The base provider supplies non-crypto bits (encoders/PEM) the FIPS provider 
 >"%~1" (
   echo config_diagnostics = 1
   echo openssl_conf = openssl_init
-  echo.
+  echo(
   echo .include %~2
-  echo.
+  echo(
   echo [openssl_init]
   echo providers = provider_sect
   echo alg_section = algorithm_sect
-  echo.
+  echo(
   echo [provider_sect]
   echo fips = fips_sect
   echo base = base_sect
-  echo.
+  echo(
   echo [base_sect]
   echo activate = 1
-  echo.
+  echo(
   echo [algorithm_sect]
   echo default_properties = fips^=yes
 )
