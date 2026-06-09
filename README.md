@@ -49,7 +49,7 @@ You’ll see three short menus:
 2. Select release tag (e.g., `openssl-3.5.2`)
 3. Select build: `secure`, `weak`, or `fips`
 
-At the end you’ll get an OpenSSL ready to use, plus a quick README and sample `openssl_*.cnf` configs.
+At the end you’ll get an OpenSSL ready to use, plus a quick `README.txt` and a sample provider config (`openssl-<build>.cnf`).
 
 ---
 
@@ -113,7 +113,8 @@ Validation
            │  ├─ bin\
            │  ├─ include\
            │  ├─ lib\
-           │  └─ ssl\              # OPENSSL_CONF lives here (optional)
+           │  └─ ssl\              # openssl-<build>.cnf (+ fipsmodule.cnf for fips)
+           ├─ README.txt           # quickstart written by Chug
            └─ src\                 # git worktree at the chosen tag (optional)
 ```
 
@@ -124,6 +125,7 @@ Validation
 - Stable-only releases are presented in menus (no pre-releases)
 - If NASM isn’t found, Chug configures OpenSSL with `no-asm`
 - If not already in a Visual C++ tools environment, Chug tries to load `vcvars64.bat`
+- `fips` builds also run `fipsinstall` (generating `fipsmodule.cnf`); the generated `openssl-fips.cnf` pulls it in via `.include`
 
 ---
 
