@@ -7,26 +7,36 @@ rem =========================
 
 rem --- parse args ---
 rem usage: openssl-chug.cmd [-h|--help] [-v|--verbose]
-rem        openssl-chug.cmd [REPO] [INSTALL_ROOT] [--source|-s] [-v|--verbose]
+rem        openssl-chug.cmd [REPO] [INSTALL_ROOT] [-platform x64|x86] [--source|-s] [-v|--verbose]
 set "CHUG_VERSION=1.0"
 set "WITH_SOURCE=0"
 set "VERBOSE=0"
 set "SHOW_HELP="
+set "PLATFORM="
 set "ARG1="
 set "ARG2="
 
-for %%A in (%*) do (
-  if /i "%%~A"=="--help"     ( set "SHOW_HELP=1" ) else (
-  if /i "%%~A"=="-h"         ( set "SHOW_HELP=1" ) else (
-  if /i "%%~A"=="--verbose"  ( set "VERBOSE=1"   ) else (
-  if /i "%%~A"=="-v"         ( set "VERBOSE=1"   ) else (
-  if /i "%%~A"=="--source"   ( set "WITH_SOURCE=1" ) else (
-  if /i "%%~A"=="-s"         ( set "WITH_SOURCE=1" ) else (
-    if not defined ARG1 ( set "ARG1=%%~A" ) else if not defined ARG2 ( set "ARG2=%%~A" )
-  ))))))
-)
+:parse_args
+if "%~1"=="" goto :args_done
+if /i "%~1"=="--help"     ( set "SHOW_HELP=1"   & shift & goto :parse_args )
+if /i "%~1"=="-h"         ( set "SHOW_HELP=1"   & shift & goto :parse_args )
+if /i "%~1"=="--verbose"  ( set "VERBOSE=1"     & shift & goto :parse_args )
+if /i "%~1"=="-v"         ( set "VERBOSE=1"     & shift & goto :parse_args )
+if /i "%~1"=="--source"   ( set "WITH_SOURCE=1" & shift & goto :parse_args )
+if /i "%~1"=="-s"         ( set "WITH_SOURCE=1" & shift & goto :parse_args )
+if /i "%~1"=="-platform"  ( set "PLATFORM=%~2"  & shift & shift & goto :parse_args )
+if /i "%~1"=="--platform" ( set "PLATFORM=%~2"  & shift & shift & goto :parse_args )
+if not defined ARG1 ( set "ARG1=%~1" & shift & goto :parse_args )
+if not defined ARG2 ( set "ARG2=%~1" & shift & goto :parse_args )
+shift
+goto :parse_args
+:args_done
 
 if defined SHOW_HELP goto :USAGE
+
+rem --- platform: default x64; accept x64 or x86 only ---
+if not defined PLATFORM set "PLATFORM=x64"
+if /i "%PLATFORM%"=="x64" ( set "PLATFORM=x64" ) else if /i "%PLATFORM%"=="x86" ( set "PLATFORM=x86" ) else ( echo [ERR] Unsupported -platform: "%PLATFORM%" ^(use x64 or x86^) & exit /b 1 )
 
 rem --- settings / validation ---
 if not defined ARG1 ( set "REPO=%USERPROFILE%\Projects\openssl" ) else ( set "REPO=%ARG1%" )
@@ -84,10 +94,11 @@ if "%BSEL%"=="2" set "BUILD_KIND=weak"
 if "%BSEL%"=="3" set "BUILD_KIND=fips"
 if not defined BUILD_KIND set "BUILD_KIND=secure"
 call :V [CHUG] Build: %BUILD_KIND%
+call :V [CHUG] Platform: %PLATFORM%
 echo(
 
-rem --- derive paths ---
-set "OUTROOT=%INSTALL_ROOT%\%BRANCH%\%TAG%\%BUILD_KIND%"
+rem --- derive paths (platform-scoped so x64/x86 don't collide) ---
+set "OUTROOT=%INSTALL_ROOT%\%BRANCH%\%TAG%\%BUILD_KIND%\%PLATFORM%"
 set "SRC_DIR=%OUTROOT%\src"
 set "PREFIX=%OUTROOT%\install"
 set "OPENSSLDIR=%PREFIX%\ssl"
@@ -96,8 +107,15 @@ rem --- git/perl checks ---
 where git >nul 2>nul || goto ERR_GIT
 where perl >nul 2>nul || goto ERR_PERL
 
-rem --- ensure MSVC toolchain (nmake); auto-bootstrap if needed ---
-where nmake >nul 2>nul || (
+rem --- ensure MSVC toolchain (nmake) for the target platform ---
+rem x64 (default): keep an existing tools env if nmake is already on PATH.
+rem x86: always load the matching cross env so we don't build with the wrong arch.
+if /i "%PLATFORM%"=="x64" (
+  where nmake >nul 2>nul || (
+    call :BOOTSTRAP_MSVC
+    where nmake >nul 2>nul || goto ERR_NMAKE
+  )
+) else (
   call :BOOTSTRAP_MSVC
   where nmake >nul 2>nul || goto ERR_NMAKE
 )
@@ -118,7 +136,7 @@ echo [INFO] CHUGALUG!
 echo(
 
 rem --- prepare git worktree at the tag ---
-echo [INFO] Preparing %TAG% (%BUILD_KIND%)...
+echo [INFO] Preparing %TAG% (%BUILD_KIND% %PLATFORM%)...
 pushd "%REPO%" || goto ERR_REPO
 if exist "%SRC_DIR%\*" call :REMOVE_WORKTREE "%SRC_DIR%"
 git worktree add --force --detach "%SRC_DIR%" "%TAG%"
@@ -131,6 +149,7 @@ popd
 rem --- configure build ---
 pushd "%SRC_DIR%" || goto ERR_SRCDIR
 set "CFG_TARGET=VC-WIN64A"
+if /i "%PLATFORM%"=="x86" set "CFG_TARGET=VC-WIN32"
 set "CFG_BUILDOPT="
 if /i "%BUILD_KIND%"=="secure" set "CFG_BUILDOPT=no-legacy"
 if /i "%BUILD_KIND%"=="weak"   set "CFG_BUILDOPT=enable-legacy"
@@ -138,14 +157,14 @@ if /i "%BUILD_KIND%"=="fips"   set "CFG_BUILDOPT=enable-fips"
 
 rem NOTE: Put options first, target last. Do NOT pass "release".
 echo(
-echo [INFO] Configuring %TAG% (%BUILD_KIND%)...
+echo [INFO] Configuring %TAG% (%BUILD_KIND% %PLATFORM%)...
 echo perl Configure shared %ASM_OPT% "--prefix=%PREFIX%" "--openssldir=%OPENSSLDIR%" %CFG_BUILDOPT% %CFG_TARGET%
 perl Configure shared %ASM_OPT% "--prefix=%PREFIX%" "--openssldir=%OPENSSLDIR%" %CFG_BUILDOPT% %CFG_TARGET%
 if errorlevel 1 goto ERR_CONFIG
 
 rem --- build & install ---
 echo(
-echo [INFO] Building %TAG% (%BUILD_KIND%)...
+echo [INFO] Building %TAG% (%BUILD_KIND% %PLATFORM%)...
 nmake /nologo clean >nul 2>nul
 nmake /nologo || goto ERR_BUILD
 
@@ -175,6 +194,7 @@ rem --- write quickstart README ---
   echo Branch: %BRANCH%
   echo Version: %VERSION%
   echo Build: %BUILD_KIND%
+  echo Platform: %PLATFORM%
   echo Install: %PREFIX%
   echo Include source in output: %WITH_SOURCE%
   echo(
@@ -216,22 +236,24 @@ echo OpenSSL Chug v%CHUG_VERSION% - Windows OpenSSL build helper
 echo(
 echo Usage:
 echo   openssl-chug.cmd [-h^|--help] [-v^|--verbose]
-echo   openssl-chug.cmd [REPO] [INSTALL_ROOT] [--source ^| -s] [-v^|--verbose]
+echo   openssl-chug.cmd [REPO] [INSTALL_ROOT] [-platform x64^|x86] [--source ^| -s] [-v^|--verbose]
 echo(
 echo Arguments:
 echo   REPO          Path to local OpenSSL git repo. Default: %%USERPROFILE%%\Projects\openssl
 echo   INSTALL_ROOT  Root for installs/output.      Default: %%USERPROFILE%%\OpenSSL
 echo(
 echo Options:
+echo   -platform ARCH Target architecture: x64 ^(default^) or x86 ^(cross-built from x64^).
 echo   -s, --source   Keep the git worktree source in the output under ^"src^".
 echo   -v, --verbose  Show detailed [CHUG] logs.
 echo   -h, --help     Show this help and exit.
 echo(
 echo Examples:
 echo   openssl-chug.cmd
+echo   openssl-chug.cmd -platform x86
 echo   openssl-chug.cmd -s
 echo   openssl-chug.cmd -v
-echo   openssl-chug.cmd C:\src\openssl D:\OpenSSL --source -v
+echo   openssl-chug.cmd C:\src\openssl D:\OpenSSL -platform x86 --source -v
 exit /b 0
 
 :: ------------------------------------------------------------
@@ -355,25 +377,28 @@ endlocal & (
 exit /b 0
 
 :BOOTSTRAP_MSVC
+rem vcvarsall.bat auto-detects the host and takes the target arch as an argument.
+set "_VCARCH=amd64"
+if /i "%PLATFORM%"=="x86" set "_VCARCH=x86"
 for %%V in (
-  "%ProgramFiles(x86)%\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
-  "%ProgramFiles%\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
-  "%ProgramFiles(x86)%\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"
-  "%ProgramFiles(x86)%\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\Build\vcvars64.bat"
-  "%ProgramFiles(x86)%\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
-  "%ProgramFiles(x86)%\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
-  "%ProgramFiles(x86)%\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvars64.bat"
-  "%ProgramFiles(x86)%\Microsoft Visual Studio\2019\Professional\VC\Auxiliary\Build\vcvars64.bat"
-  "%ProgramFiles(x86)%\Microsoft Visual Studio\2019\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+  "%ProgramFiles(x86)%\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvarsall.bat"
+  "%ProgramFiles%\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvarsall.bat"
+  "%ProgramFiles(x86)%\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvarsall.bat"
+  "%ProgramFiles(x86)%\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\Build\vcvarsall.bat"
+  "%ProgramFiles(x86)%\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat"
+  "%ProgramFiles(x86)%\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvarsall.bat"
+  "%ProgramFiles(x86)%\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvarsall.bat"
+  "%ProgramFiles(x86)%\Microsoft Visual Studio\2019\Professional\VC\Auxiliary\Build\vcvarsall.bat"
+  "%ProgramFiles(x86)%\Microsoft Visual Studio\2019\Enterprise\VC\Auxiliary\Build\vcvarsall.bat"
 ) do (
   if exist %%~fV (
-    echo [INFO] Loading MSVC env: %%~fV
-    call "%%~fV" >nul 2>nul
+    echo [INFO] Loading MSVC env: %%~fV %_VCARCH%
+    call "%%~fV" %_VCARCH% >nul 2>nul
     goto :eof
   )
 )
-echo [WARN] Could not auto-locate Visual Studio vcvars64.bat.
-echo Either install VS Build Tools 2022 (C++ workloads) or run from the "x64 Native Tools" prompt.
+echo [WARN] Could not auto-locate Visual Studio vcvarsall.bat.
+echo Either install VS Build Tools 2022 (C++ workloads) or run from a Native Tools prompt.
 goto :eof
 
 :REMOVE_WORKTREE
