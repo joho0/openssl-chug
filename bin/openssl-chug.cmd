@@ -36,21 +36,21 @@ if "%REPO:~-1%"=="\" set "REPO=%REPO:~0,-1%"
 if "%INSTALL_ROOT:~-1%"=="\" set "INSTALL_ROOT=%INSTALL_ROOT:~0,-1%"
 
 rem --- REPO must exist and look like OpenSSL ---
-if not exist "%REPO%\*" call :die [CHUG] ERROR: REPO not found: "%REPO%"
-if not exist "%REPO%\README.md" call :die [CHUG] ERROR: README.md missing under "%REPO%"
+if not exist "%REPO%\*" ( echo [CHUG] ERROR: REPO not found: "%REPO%" & exit /b 1 )
+if not exist "%REPO%\README.md" ( echo [CHUG] ERROR: README.md missing under "%REPO%" & exit /b 1 )
 rem Require README.md line 1 (allow leading '#' or spaces)
 findstr /n /r "^" "%REPO%\README.md" | findstr /r "^1:[# ]*Welcome to the OpenSSL Project" >nul
-if errorlevel 1 call :die [CHUG] ERROR: README.md line 1 must be: "Welcome to the OpenSSL Project"
+if errorlevel 1 ( echo [CHUG] ERROR: README.md line 1 must be: "Welcome to the OpenSSL Project" & exit /b 1 )
 
 rem --- INSTALL_ROOT: ensure valid directory (prompt to create) ---
 if exist "%INSTALL_ROOT%\*" goto :inst_ok
-if exist "%INSTALL_ROOT%" call :die [CHUG] ERROR: INSTALL_ROOT exists but is not a directory: "%INSTALL_ROOT%"
+if exist "%INSTALL_ROOT%" ( echo [CHUG] ERROR: INSTALL_ROOT exists but is not a directory: "%INSTALL_ROOT%" & exit /b 1 )
 call :V [CHUG] WARN: INSTALL_ROOT not found: "%INSTALL_ROOT%"
 echo INSTALL_ROOT not found: "%INSTALL_ROOT%"
 choice /C YN /M "Create it now?"
-if errorlevel 2 call :die [CHUG] ERROR: Aborted; INSTALL_ROOT missing.
+if errorlevel 2 ( echo [CHUG] ERROR: Aborted; INSTALL_ROOT missing. & exit /b 1 )
 mkdir "%INSTALL_ROOT%" 2>nul
-if errorlevel 1 call :die [CHUG] ERROR: Failed to create INSTALL_ROOT: "%INSTALL_ROOT%"
+if errorlevel 1 ( echo [CHUG] ERROR: Failed to create INSTALL_ROOT: "%INSTALL_ROOT%" & exit /b 1 )
 call :V [CHUG] Created INSTALL_ROOT: "%INSTALL_ROOT%"
 
 :inst_ok
@@ -150,7 +150,11 @@ nmake /nologo || goto ERR_BUILD
 
 echo(
 echo [INFO] Installing to: %PREFIX%
-nmake /nologo install_sw install_ssldirs || goto ERR_INSTALL
+rem fips builds must also install the FIPS module and run fipsinstall
+rem (install_fips installs fips.dll and generates %OPENSSLDIR%\fipsmodule.cnf)
+set "INSTALL_TARGETS=install_sw install_ssldirs"
+if /i "%BUILD_KIND%"=="fips" set "INSTALL_TARGETS=install_sw install_ssldirs install_fips"
+nmake /nologo %INSTALL_TARGETS% || goto ERR_INSTALL
 
 rem --- optional: write example provider configs per build ---
 set "CNF_SEC=%OPENSSLDIR%\openssl-secure.cnf"
@@ -160,7 +164,7 @@ set "README=%OUTROOT%\README.txt"
 
 if /i "%BUILD_KIND%"=="secure" call :WRITE_SECURE "%CNF_SEC%"
 if /i "%BUILD_KIND%"=="weak"   call :WRITE_WEAK   "%CNF_WEAK%"
-if /i "%BUILD_KIND%"=="fips"   call :WRITE_FIPS   "%CNF_FIPS%"
+if /i "%BUILD_KIND%"=="fips"   call :WRITE_FIPS   "%CNF_FIPS%" "%OPENSSLDIR%\fipsmodule.cnf"
 
 rem --- write quickstart README ---
 >"%README%" (
@@ -267,10 +271,12 @@ for /f "usebackq delims=" %%T in (`git tag -l "openssl-3.*" --sort=-v:refname`) 
 
 rem Remote fallback if nothing found locally
 if !_bi! LSS 1 (
-  for /f "usebackq tokens=2 delims=/" %%R in (`
+  for /f "usebackq tokens=3 delims=/" %%R in (`
     git ls-remote --tags origin "refs/tags/openssl-3.*" 2^>nul
   `) do (
-    set "t=openssl-%%R"
+    set "t=%%R"
+    rem strip annotated-tag deref suffix (openssl-3.5.2^{})
+    set "t=!t:^{}=!"
     set "skip="
     if not "!t:-alpha=!"=="!t!" set "skip=1"
     if not "!t:-beta=!"=="!t!"  set "skip=1"
@@ -292,7 +298,7 @@ if !_bi! LSS 1 (
   )
 )
 
-if !_bi! LSS 1 ( popd endlocal & exit /b 1 )
+if !_bi! LSS 1 ( popd & endlocal & exit /b 1 )
 
 set "_BR_COUNT=%_bi%"
 echo(
@@ -321,7 +327,7 @@ for /f "usebackq delims=" %%T in (`git tag -l "%_BRANCH%.*" --sort=-v:refname`) 
     if !_ti2! LEQ 20 set "_T_!_ti2!=!t!"
   )
 )
-if !_ti2! LSS 1 ( popd endlocal & exit /b 1 )
+if !_ti2! LSS 1 ( popd & endlocal & exit /b 1 )
 
 set "_TAG_COUNT=%_ti2%"
 echo(
@@ -417,8 +423,14 @@ exit /b
 exit /b
 
 :WRITE_FIPS
+rem args: %1 = output .cnf path, %2 = path to generated fipsmodule.cnf
+rem [fips_sect] is defined by the .include'd fipsmodule.cnf (self-test MAC values).
+rem The base provider supplies non-crypto bits (encoders/PEM) the FIPS provider lacks.
 >"%~1" (
+  echo config_diagnostics = 1
   echo openssl_conf = openssl_init
+  echo.
+  echo .include %~2
   echo.
   echo [openssl_init]
   echo providers = provider_sect
@@ -426,9 +438,9 @@ exit /b
   echo.
   echo [provider_sect]
   echo fips = fips_sect
-  echo default = default_sect
+  echo base = base_sect
   echo.
-  echo [default_sect]
+  echo [base_sect]
   echo activate = 1
   echo.
   echo [algorithm_sect]
@@ -478,10 +490,6 @@ exit /b 1
 :ERR_INSTALL
 echo [ERR] Install failed.
 popd
-exit /b 1
-
-:die
-echo %*
 exit /b 1
 
 rem --- verbose echo helper (prints only when -v/--verbose is set) ---
