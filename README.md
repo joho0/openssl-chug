@@ -66,9 +66,14 @@ openssl-chug.cmd [REPO] [INSTALL_ROOT] [-platform x64|x86] [--source|-s] [-v|--v
 
 **Options**
 - `-platform <x64|x86>` — target architecture (default: `x64`). `x86` is cross-built from an x64 host and runs under WOW64, so no 32-bit machine is needed.
+- `--tag <tag>` — build a specific tag (e.g. `openssl-3.5.2`) and skip the tag menu
+- `--build <secure|weak|fips>` — pick the build kind and skip the build menu
+- `--dry-run, -n` — plan only: print the commands that *would* run and write the provider config/README, but perform no clone, configure, or build (needs no toolchain). Handy as a cheap smoke test of the selection/path/config logic.
 - `-s, --source` — keep the git worktree source under `src` in the output
 - `-v, --verbose` — show detailed `[CHUG]` diagnostic logs (default run is quieter)
 - `-h, --help` — show help and exit
+
+> Tip: `openssl-chug.cmd --dry-run --tag openssl-3.5.2 --build fips -platform x86` exercises the whole flow in seconds without an OpenSSL clone or MSVC — output lands under `INSTALL_ROOT` for inspection.
 
 **Examples**
 ```bat

@@ -7,12 +7,16 @@ rem =========================
 
 rem --- parse args ---
 rem usage: openssl-chug.cmd [-h|--help] [-v|--verbose]
-rem        openssl-chug.cmd [REPO] [INSTALL_ROOT] [-platform x64|x86] [--source|-s] [-v|--verbose]
+rem        openssl-chug.cmd [REPO] [INSTALL_ROOT] [-platform x64|x86]
+rem                         [--tag <tag>] [--build secure|weak|fips] [--dry-run|-n] [--source|-s] [-v|--verbose]
 set "CHUG_VERSION=1.0"
 set "WITH_SOURCE=0"
 set "VERBOSE=0"
 set "SHOW_HELP="
 set "PLATFORM="
+set "DRY_RUN=0"
+set "OPT_TAG="
+set "OPT_BUILD="
 set "ARG1="
 set "ARG2="
 
@@ -24,8 +28,12 @@ if /i "%~1"=="--verbose"  ( set "VERBOSE=1"     & shift & goto :parse_args )
 if /i "%~1"=="-v"         ( set "VERBOSE=1"     & shift & goto :parse_args )
 if /i "%~1"=="--source"   ( set "WITH_SOURCE=1" & shift & goto :parse_args )
 if /i "%~1"=="-s"         ( set "WITH_SOURCE=1" & shift & goto :parse_args )
+if /i "%~1"=="--dry-run"  ( set "DRY_RUN=1"     & shift & goto :parse_args )
+if /i "%~1"=="-n"         ( set "DRY_RUN=1"     & shift & goto :parse_args )
 if /i "%~1"=="-platform"  ( set "PLATFORM=%~2"  & shift & shift & goto :parse_args )
 if /i "%~1"=="--platform" ( set "PLATFORM=%~2"  & shift & shift & goto :parse_args )
+if /i "%~1"=="--tag"      ( set "OPT_TAG=%~2"   & shift & shift & goto :parse_args )
+if /i "%~1"=="--build"    ( set "OPT_BUILD=%~2" & shift & shift & goto :parse_args )
 if not defined ARG1 ( set "ARG1=%~1" & shift & goto :parse_args )
 if not defined ARG2 ( set "ARG2=%~1" & shift & goto :parse_args )
 shift
@@ -46,16 +54,20 @@ rem trim trailing backslashes
 if "%REPO:~-1%"=="\" set "REPO=%REPO:~0,-1%"
 if "%INSTALL_ROOT:~-1%"=="\" set "INSTALL_ROOT=%INSTALL_ROOT:~0,-1%"
 
-rem --- REPO must exist and look like OpenSSL ---
+rem --- REPO must exist and look like OpenSSL (skipped in --dry-run; no clone needed) ---
+if "%DRY_RUN%"=="1" goto :repo_ok
 if not exist "%REPO%\*" ( echo [ERR] REPO not found: "%REPO%" & exit /b 1 )
 if not exist "%REPO%\README.md" ( echo [ERR] README.md missing under "%REPO%" & exit /b 1 )
 rem Require README.md line 1 (allow leading '#' or spaces)
 findstr /n /r "^" "%REPO%\README.md" | findstr /r "^1:[# ]*Welcome to the OpenSSL Project" >nul
 if errorlevel 1 ( echo [ERR] README.md line 1 must be: "Welcome to the OpenSSL Project" & exit /b 1 )
+:repo_ok
 
 rem --- INSTALL_ROOT: ensure valid directory (prompt to create) ---
 if exist "%INSTALL_ROOT%\*" goto :inst_ok
 if exist "%INSTALL_ROOT%" ( echo [ERR] INSTALL_ROOT exists but is not a directory: "%INSTALL_ROOT%" & exit /b 1 )
+rem dry-run: create silently (no prompt) so the run is unattended
+if "%DRY_RUN%"=="1" ( mkdir "%INSTALL_ROOT%" 2>nul & goto :inst_ok )
 call :V [CHUG] WARN: INSTALL_ROOT not found: "%INSTALL_ROOT%"
 echo INSTALL_ROOT not found: "%INSTALL_ROOT%"
 choice /C YN /M "Create it now?"
@@ -72,11 +84,16 @@ call :V [CHUG] Include source in output: %WITH_SOURCE%
 echo(
 echo OpenSSL Chug v%CHUG_VERSION%
 
-rem --- tag picker (self-contained: branch -> tag) ---
+rem --- tag: --tag bypasses the picker; dry-run uses a placeholder; else interactive ---
+if defined OPT_TAG ( call :PARSE_TAG "%OPT_TAG%" & goto :tag_ready )
+if "%DRY_RUN%"=="1" ( call :PARSE_TAG "openssl-3.0.0" & goto :tag_ready )
 call :PICK_TAG "%REPO%"
 if errorlevel 1 goto ERR_TAG
+:tag_ready
 
-rem --- build menu (minimal) ---
+rem --- build: --build bypasses the menu; dry-run defaults secure; else menu ---
+if defined OPT_BUILD ( set "BUILD_KIND=%OPT_BUILD%" & goto :build_ready )
+if "%DRY_RUN%"=="1"  ( set "BUILD_KIND=secure"      & goto :build_ready )
 echo(
 call :V [CHUG] Select a build (default 1):
 echo 1^) secure
@@ -93,9 +110,23 @@ if "%BSEL%"=="1" set "BUILD_KIND=secure"
 if "%BSEL%"=="2" set "BUILD_KIND=weak"
 if "%BSEL%"=="3" set "BUILD_KIND=fips"
 if not defined BUILD_KIND set "BUILD_KIND=secure"
+:build_ready
+rem normalize / validate build kind (accepts --build values too)
+if /i "%BUILD_KIND%"=="secure" ( set "BUILD_KIND=secure" ) else if /i "%BUILD_KIND%"=="weak" ( set "BUILD_KIND=weak" ) else if /i "%BUILD_KIND%"=="fips" ( set "BUILD_KIND=fips" ) else ( echo [ERR] Unsupported --build: "%BUILD_KIND%" ^(use secure, weak, or fips^) & exit /b 1 )
 call :V [CHUG] Build: %BUILD_KIND%
 call :V [CHUG] Platform: %PLATFORM%
 echo(
+
+rem --- map platform/build to Configure target, options, and make targets ---
+set "CFG_TARGET=VC-WIN64A"
+if /i "%PLATFORM%"=="x86" set "CFG_TARGET=VC-WIN32"
+set "CFG_BUILDOPT="
+if /i "%BUILD_KIND%"=="secure" set "CFG_BUILDOPT=no-legacy"
+if /i "%BUILD_KIND%"=="weak"   set "CFG_BUILDOPT=enable-legacy"
+if /i "%BUILD_KIND%"=="fips"   set "CFG_BUILDOPT=enable-fips"
+rem fips also needs install_fips (installs fips.dll + generates fipsmodule.cnf)
+set "INSTALL_TARGETS=install_sw install_ssldirs"
+if /i "%BUILD_KIND%"=="fips" set "INSTALL_TARGETS=install_sw install_ssldirs install_fips"
 
 rem --- derive paths (platform-scoped so x64/x86 don't collide) ---
 set "OUTROOT=%INSTALL_ROOT%\%BRANCH%\%TAG%\%BUILD_KIND%\%PLATFORM%"
@@ -103,7 +134,8 @@ set "SRC_DIR=%OUTROOT%\src"
 set "PREFIX=%OUTROOT%\install"
 set "OPENSSLDIR=%PREFIX%\ssl"
 
-rem --- git/perl checks ---
+rem --- toolchain checks (skipped in --dry-run; no toolchain needed) ---
+if "%DRY_RUN%"=="1" goto :skip_tools
 where git >nul 2>nul || goto ERR_GIT
 where perl >nul 2>nul || goto ERR_PERL
 
@@ -119,6 +151,7 @@ if /i "%PLATFORM%"=="x64" (
   call :BOOTSTRAP_MSVC
   where nmake >nul 2>nul || goto ERR_NMAKE
 )
+:skip_tools
 
 rem --- asm check (optional) ---
 set "ASM_OPT="
@@ -135,6 +168,8 @@ if not exist "%OPENSSLDIR%\" mkdir "%OPENSSLDIR%" >nul 2>nul
 echo [INFO] CHUGALUG!
 echo(
 
+if "%DRY_RUN%"=="1" goto :DRY_PLAN
+
 rem --- prepare git worktree at the tag ---
 echo [INFO] Preparing %TAG% (%BUILD_KIND% %PLATFORM%)...
 pushd "%REPO%" || goto ERR_REPO
@@ -146,15 +181,8 @@ if errorlevel 1 (
 )
 popd
 
-rem --- configure build ---
+rem --- configure build (target/options computed earlier) ---
 pushd "%SRC_DIR%" || goto ERR_SRCDIR
-set "CFG_TARGET=VC-WIN64A"
-if /i "%PLATFORM%"=="x86" set "CFG_TARGET=VC-WIN32"
-set "CFG_BUILDOPT="
-if /i "%BUILD_KIND%"=="secure" set "CFG_BUILDOPT=no-legacy"
-if /i "%BUILD_KIND%"=="weak"   set "CFG_BUILDOPT=enable-legacy"
-if /i "%BUILD_KIND%"=="fips"   set "CFG_BUILDOPT=enable-fips"
-
 rem NOTE: Put options first, target last. Do NOT pass "release".
 echo(
 echo [INFO] Configuring %TAG% (%BUILD_KIND% %PLATFORM%)...
@@ -170,23 +198,62 @@ nmake /nologo || goto ERR_BUILD
 
 echo(
 echo [INFO] Installing to: %PREFIX%
-rem fips builds must also install the FIPS module and run fipsinstall
-rem (install_fips installs fips.dll and generates %OPENSSLDIR%\fipsmodule.cnf)
-set "INSTALL_TARGETS=install_sw install_ssldirs"
-if /i "%BUILD_KIND%"=="fips" set "INSTALL_TARGETS=install_sw install_ssldirs install_fips"
 nmake /nologo %INSTALL_TARGETS% || goto ERR_INSTALL
 
-rem --- optional: write example provider configs per build ---
+rem --- write example provider config + quickstart README ---
+call :WRITE_OUTPUTS
+
+rem --- show result ---
+echo(
+echo [OK] Build complete.
+echo [INFO] "%PREFIX%\bin\openssl.exe" version -a
+"%PREFIX%\bin\openssl.exe" version -a
+popd
+
+rem --- cleanup src worktree unless keeping source ---
+if "%WITH_SOURCE%"=="0" (
+  echo [INFO] Cleaning up src worktree: "%SRC_DIR%"
+  pushd "%REPO%" >nul 2>nul && (
+    call :REMOVE_WORKTREE "%SRC_DIR%"
+    popd
+  )
+) else (
+  echo [INFO] Keeping src worktree: "%SRC_DIR%"
+)
+
+exit /b 0
+
+:DRY_PLAN
+rem --- dry run: report the plan and write config files, but run nothing expensive ---
+echo [DRY-RUN] No build will run. Plan for %TAG% (%BUILD_KIND% %PLATFORM%):
+echo [DRY]   Configure target : %CFG_TARGET%
+echo [DRY]   Configure opts   : shared %ASM_OPT% %CFG_BUILDOPT%
+echo [DRY]   install targets  : %INSTALL_TARGETS%
+echo [DRY]   prefix           : %PREFIX%
+echo [DRY]   openssldir       : %OPENSSLDIR%
+echo [DRY]   src worktree     : %SRC_DIR%
+echo(
+echo [DRY] would run: git worktree add --force --detach "%SRC_DIR%" "%TAG%"
+echo [DRY] would run: perl Configure shared %ASM_OPT% "--prefix=%PREFIX%" "--openssldir=%OPENSSLDIR%" %CFG_BUILDOPT% %CFG_TARGET%
+echo [DRY] would run: nmake /nologo clean
+echo [DRY] would run: nmake /nologo
+echo [DRY] would run: nmake /nologo %INSTALL_TARGETS%
+echo [DRY] would run: "%PREFIX%\bin\openssl.exe" version -a
+echo(
+echo [DRY] Writing provider config + README for inspection...
+call :WRITE_OUTPUTS
+echo [OK] Dry run complete. Output written under: %OUTROOT%
+exit /b 0
+
+:WRITE_OUTPUTS
+rem writes the per-build provider .cnf and the quickstart README.txt (shared by real + dry runs)
 set "CNF_SEC=%OPENSSLDIR%\openssl-secure.cnf"
 set "CNF_WEAK=%OPENSSLDIR%\openssl-weak.cnf"
 set "CNF_FIPS=%OPENSSLDIR%\openssl-fips.cnf"
 set "README=%OUTROOT%\README.txt"
-
 if /i "%BUILD_KIND%"=="secure" call :WRITE_SECURE "%CNF_SEC%"
 if /i "%BUILD_KIND%"=="weak"   call :WRITE_WEAK   "%CNF_WEAK%"
 if /i "%BUILD_KIND%"=="fips"   call :WRITE_FIPS   "%CNF_FIPS%" "%OPENSSLDIR%\fipsmodule.cnf"
-
-rem --- write quickstart README ---
 >"%README%" (
   echo OpenSSL Chug
   echo =============
@@ -210,25 +277,6 @@ if exist "%CNF_FIPS%" >>"%README%" echo %CNF_FIPS%
   echo Verify:
   echo openssl version -a
 )
-
-rem --- show result ---
-echo(
-echo [OK] Build complete.
-echo [INFO] "%PREFIX%\bin\openssl.exe" version -a
-"%PREFIX%\bin\openssl.exe" version -a
-popd
-
-rem --- cleanup src worktree unless keeping source ---
-if "%WITH_SOURCE%"=="0" (
-  echo [INFO] Cleaning up src worktree: "%SRC_DIR%"
-  pushd "%REPO%" >nul 2>nul && (
-    call :REMOVE_WORKTREE "%SRC_DIR%"
-    popd
-  )
-) else (
-  echo [INFO] Keeping src worktree: "%SRC_DIR%"
-)
-
 exit /b 0
 
 :USAGE
@@ -243,17 +291,27 @@ echo   REPO          Path to local OpenSSL git repo. Default: %%USERPROFILE%%\Pr
 echo   INSTALL_ROOT  Root for installs/output.      Default: %%USERPROFILE%%\OpenSSL
 echo(
 echo Options:
-echo   -platform ARCH Target architecture: x64 ^(default^) or x86 ^(cross-built from x64^).
-echo   -s, --source   Keep the git worktree source in the output under ^"src^".
-echo   -v, --verbose  Show detailed [CHUG] logs.
-echo   -h, --help     Show this help and exit.
+echo   -platform ARCH  Target architecture: x64 ^(default^) or x86 ^(cross-built from x64^).
+echo   --tag TAG       Build this tag ^(e.g. openssl-3.5.2^); skips the tag menu.
+echo   --build KIND    Build kind: secure ^| weak ^| fips; skips the build menu.
+echo   --dry-run, -n   Plan only: print what would run and write the config files; no build.
+echo   -s, --source    Keep the git worktree source in the output under ^"src^".
+echo   -v, --verbose   Show detailed [CHUG] logs.
+echo   -h, --help      Show this help and exit.
 echo(
 echo Examples:
 echo   openssl-chug.cmd
 echo   openssl-chug.cmd -platform x86
-echo   openssl-chug.cmd -s
-echo   openssl-chug.cmd -v
+echo   openssl-chug.cmd --tag openssl-3.5.2 --build fips
+echo   openssl-chug.cmd --dry-run --tag openssl-3.5.2 --build fips -platform x86
 echo   openssl-chug.cmd C:\src\openssl D:\OpenSSL -platform x86 --source -v
+exit /b 0
+
+:PARSE_TAG
+rem args: %1 = tag (e.g. openssl-3.5.2) -> sets TAG, VERSION, BRANCH non-interactively
+set "TAG=%~1"
+set "VERSION=%TAG:openssl-=%"
+for /f "tokens=1-2 delims=." %%a in ("%VERSION%") do set "BRANCH=openssl-%%a.%%b"
 exit /b 0
 
 :: ------------------------------------------------------------
