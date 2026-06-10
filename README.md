@@ -51,13 +51,16 @@ You’ll see three short menus:
 
 At the end you’ll get an OpenSSL ready to use, plus a quick `README.txt` and a sample provider config (`openssl-<build>.cnf`).
 
+Prefer no menus? Pass `--tag` and `--build` to run unattended, or add `--dry-run` to preview the plan and generated config without building (see [Usage](#usage)).
+
 ---
 
 ## Usage
 
 ```bat
 openssl-chug.cmd [-h|--help] [-v|--verbose]
-openssl-chug.cmd [REPO] [INSTALL_ROOT] [-platform x64|x86] [--source|-s] [-v|--verbose]
+openssl-chug.cmd [REPO] [INSTALL_ROOT] [-platform x64|x86]
+                 [--tag <tag>] [--build secure|weak|fips] [--dry-run|-n] [--source|-s] [-v|--verbose]
 ```
 
 **Arguments**
@@ -80,6 +83,8 @@ openssl-chug.cmd [REPO] [INSTALL_ROOT] [-platform x64|x86] [--source|-s] [-v|--v
 openssl-chug.cmd
 openssl-chug.cmd -s
 openssl-chug.cmd -v
+openssl-chug.cmd --tag openssl-3.5.2 --build fips           &:: non-interactive (no menus)
+openssl-chug.cmd --dry-run --tag openssl-3.5.2 --build fips &:: plan only, no build
 openssl-chug.cmd C:\src\openssl D:\OpenSSL --source -v
 ```
 
